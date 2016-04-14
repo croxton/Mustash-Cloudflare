@@ -1,0 +1,22 @@
+{
+    "name": "jamesryanbell/cloudflare",
+    "description": "Cloudflare API V4 PHP wrapper",
+    "license": "MIT",
+    "keywords": ["cloudflare", "api"],
+    "authors": [
+        {
+            "name": "James Bell",
+            "email": "james@james-bell.co.uk"
+        }
+    ],
+    "require": {},
+    "require-dev": {
+        "phpunit/phpunit": "*",
+        "satooshi/php-coveralls": "dev-master"
+    },
+    "autoload": {
+        "psr-4": {
+            "Cloudflare\\": "src/CloudFlare"
+        }
+    }
+}
