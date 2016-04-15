@@ -55,6 +55,31 @@ class Mustash_cloudflare_ext {
 	 */
 	protected $zone_id = '';
 
+	/**
+	 * The queue of URLs to purge
+	 *
+	 * @var 	object
+	 * @access 	protected
+	 */
+	protected $queue;
+
+	/**
+	 * The maximum number of concurrent requests to send to Cloudflare
+	 *
+	 * @var 	integer
+	 * @access 	private
+	 */
+	private $cloudflare_request_limit = 10;
+
+	/**
+	 * The maximum number of URLs that Cloudflare will clear per request
+	 *
+	 * @var 	integer
+	 * @access 	private
+	 */
+	private $cloudflare_url_limit = 30;
+
+
 	// ------------------------------------------------------
 	
 	/**
@@ -69,6 +94,10 @@ class Mustash_cloudflare_ext {
 		$this->email 		= ee()->config->item('mustash_cloudflare_email');
 		$this->api_key 		= ee()->config->item('mustash_cloudflare_api_key');
 		$this->zone_id 		= ee()->config->item('mustash_cloudflare_domain_zone_id');
+
+		$this->queue 		= new stdClass;
+		$this->queue->ids 	= array();
+		$this->queue->urls 	= array();
 	}
 	
 	// ------------------------------------------------------
@@ -224,18 +253,24 @@ class Mustash_cloudflare_ext {
 	public function stash_prune($data) 
 	{
 		// get the queue of urls to purge from Cloudflare
-		$urls = $this->get_queue();
+		$this->get_queue();
 
-		if (count($urls) > 0)
+		if (count($this->queue->urls) > 0)
 		{
+			// chunk the array so we don't send too many urls per request
+			$requests = array_chunk($this->queue->urls, $this->cloudflare_url_limit);
+
 			// create a connection to the Cloudflare API
 			$cache = new Cloudflare\Zone\Cache($this->email, $this->api_key);
 
-			// purge the urls
-    		$cache->purge_files($this->zone_id, $urls);
+			foreach ($requests as $urls)
+			{
+				// purge the urls
+    			$cache->purge_files($this->zone_id, $urls);
+			}
 
-    		// reset the queue
-			$this->reset_queue();
+			// remove purged URLs from the queue
+			$this->prune_queue();
 		}
 	}
 
@@ -269,18 +304,22 @@ class Mustash_cloudflare_ext {
 	 *
 	 * Get an array of urls to purge
 	 *
-	 * @return array 
+	 * @return void 
 	 */
 	protected function get_queue() 
 	{
-		$urls = array();
-		$query = ee()->db->get('mustash_cloudflare');
-		foreach ($query->result() as $row)
-		{
-			$urls[] = $row->url;
-		}
+		// maximum number of individual URLs we can safely purge in one go
+		$limit = $this->cloudflare_url_limit * $this->cloudflare_request_limit;
 
-		return $urls;
+		$query = ee()->db->get('mustash_cloudflare', $limit);
+
+		if ($query->num_rows() > 0)
+		{
+			foreach($query->result() as $row) {
+				$this->queue->ids[] = $row->id;
+				$this->queue->urls[] = $row->url;
+			}
+		}
 	}
 
 	// ----------------------------------------------------------------------
@@ -288,13 +327,27 @@ class Mustash_cloudflare_ext {
 	/**
 	 * reset_queue
 	 *
-	 * Remove all urls from thre queue
+	 * Remove all urls from the queue
 	 *
 	 * @return void 
 	 */
 	protected function reset_queue() 
 	{
 		ee()->db->truncate('mustash_cloudflare');
+	}
+
+	// ----------------------------------------------------------------------
+	
+	/**
+	 * prune_queue
+	 *
+	 * Remove purged URLs from the queue
+	 *
+	 * @return void 
+	 */
+	protected function prune_queue() 
+	{
+		return ee()->db->where_in('id', $this->queue->ids)->delete('mustash_cloudflare');
 	}
 }
 

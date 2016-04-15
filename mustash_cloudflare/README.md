@@ -9,6 +9,19 @@ Cloudflare static cache invalidation for Mustash.
 * Time-limited static cached pages will be automatically pruned from the Cloudflare cache on expiry.
 * Clearing the Mustash cache will purge the entire Cloudflare cache for your domain.
 
+### How it works
+
+1. We tell Cloudflare to cache everything, except the EE control panel admin and ACTions
+
+2. We ensure that requests that pass through to EE templates are served with no-cache headers, which Cloudflare will respect. Forms and other types of dynamic content will continue to work as expected, as will the control panel.
+
+3. We add `{exp:stash:static}` tags to the specific templates we DO want to cache. These generate static HTML pages which are served with special `max-age` and `s-maxage` headers to ensure that Cloudflare caches them in it's CDN.
+
+4. When an entry is edited and triggers a Mustash cache-breaking rule, the Mustash Cloudflare extension adds any page URLs matched by the rule to a queue. When a time-limited static cached page expires, or a static cached variable is deleted in Mustash, it's URL is also added to the queue.
+
+5. We use the Stash cache pruning CRON to peridically send requests via the Cloudflare API to clear the URLs in the queue, while respecting Cloudflare's rate limits.
+
+
 ### Requirements
 
 * [ExpressionEngine](https://ellislab.com/expressionengine) 2.9+ or 3.1+
@@ -23,15 +36,21 @@ Cloudflare static cache invalidation for Mustash.
 
 ### Installation
 
-1. Make sure you have already installed [Stash](https://github.com/croxton/Stash) and [Mustash](https://devot-ee.com/add-ons/mustash)
+1. If you haven't already, create a [Cloudflare](https://www.cloudflare.com) account and add your domain.
 
-2. Follow the instructions to [setup static caching](https://github.com/croxton/Stash/wiki/Static-cache-setup) but use the `.htaccess` file below.
+2. Make sure you have already installed [Stash](https://github.com/croxton/Stash) and [Mustash](https://devot-ee.com/add-ons/mustash)
 
-3. Setup the Stash [cache-pruning configuration](https://github.com/croxton/Stash/wiki/Cache-pruning-configuration), using a 5 minute (or less) CRON, e.g.:
+3. Follow the instructions to [setup static caching](https://github.com/croxton/Stash/wiki/Static-cache-setup) but use the `.htaccess` file below.
+
+4. Ensure that your website is accessible at a single canonical domain by redirecting non-www to www (or vice versa), and redirecting http to https if you have enabled SSL. Uncomment the relevant rules in the `.htaccess` file.
+
+5. Setup the Stash [cache-pruning configuration](https://github.com/croxton/Stash/wiki/Cache-pruning-configuration), using a 5 minute (or less) CRON, e.g.:
 	
-	*/5 * * * * wget -qO- 'http://your-domain.com/?ACT=123&key=456&prune=1' >/dev/null 2>&1
+    ```
+    */5 * * * * wget -qO- 'http://your-domain.com/?ACT=123&key=456&prune=1' >/dev/null 2>&1
+    ```
 
-4. Open your `./system/expressionengine/config/config.php` file (EE2) or `./system/user/config/config.php` (EE3), add the following lines at the bottom of the file:
+6. Open your `./system/expressionengine/config/config.php` file (EE2) or `./system/user/config/config.php` (EE3), add the following lines at the bottom of the file:
 
 	```PHP
 	// The email account you use to log in to Cloudflare
@@ -44,32 +63,35 @@ Cloudflare static cache invalidation for Mustash.
 	$env_config['mustash_cloudflare_domain_zone_id'] 	= '12345678901234567890';
 	```
 
-5. Unzip the download, and then:
+7. Download and unzip this repo, and then:
 
 	*ExpressionEngine 2* - move the 'mustash_cloudflare' folder to the `./system/expressionengine/third_party` directory. Go to the Add-Ons > Extensions and click the 'Install' link.
 
 	*ExpressionEngine 3* - move the 'mustash_cloudflare' folder to the `./system/user/addons` directory. Go to Add-On Manager and click the button to install `Mustash Cloudflare`.
 
-6. In your Cloudflare account, configure these Page Rules for your domain:
+8. In your Cloudflare account, add these Page Rules for your domain, in this order:
 
-	*Pattern:*        
-	your-domain.com/admin.php*
+    1.  *Pattern:*        
+        your-domain.com/admin.php\*
 
-	*Rules:*     
-	Apps: Off, Performance: Off, Security: Off, Always online: Off, Cache level: Bypass cache
+        *Rules:*     
+        Apps: Off, Performance: Off, Security: Off, Always online: Off, Cache level: Bypass cache
+    
+    2.  *Pattern:*        
+        your-domain.com/\*ACT=\*
 
-	*Pattern:*     
-	*your-domain.com/*
+        *Rules:*     
+        Apps: Off, Performance: Off, Security: Off, Always online: Off, Cache level: Bypass cache
+
+    3.  *Pattern:*     
+        \*your-domain.com/\*
 	
-	*Rules:*     
-	Browser cache expire TTL: 30 minutes, Edge cache expire TTL: Respect all existing headers, Custom caching: Cache everything
-	
-	You may wish to add further rules to exclude parts of your website from caching 
+        *Rules:*     
+        Browser cache expire TTL: 30 minutes, Edge cache expire TTL: Respect all existing headers, Custom caching: Cache everything
 
+9. 	We need to ensure that all requests that pass through to EE templates return no-cache headers. Cloudflare respects these headers and will not cache the pages. Only templates set up to generate static-cached pages will be cached by Cloudflare on a subsequent visit to the url. Any other pages that you choose not to static cache, such as those containing forms, will not be cached by Cloudflare.
 
-7. 	We need to ensure that all requests that pass through to EE return no-cache headers.
-
-	If you have Resource Router installed, add this rule to add a no-cache header to all requests:
+	If you have Resource Router installed, create this rule to add a no-cache header to all requests:
 
 	```PHP
     '.*' => function($router) {   
@@ -84,10 +106,15 @@ Cloudflare static cache invalidation for Mustash.
 	If you don't want to use Resource Router, there are a number of other add-ons that allow you to set these headers in templates, e.g. [HTTP Header](https://github.com/rsanchez/http_header])
 
 
+9. Add [{exp:stash:static}](https://github.com/croxton/Stash/wiki/%7Bexp:stash:static%7D) to templates you want to cache, and set up Mustash [cache-breaking rules](https://github.com/croxton/Stash/wiki/Cache-breaking-rules) as normal.
+
+
 ### .htaccess file
 
+This file requires the Apache `mod_headers` module (installed by default). It differs from the standard Stash static caching rules in that it allows you to specify the cache duration of resources cached by Cloudflare and by the browser.
+
 * Replace '[site_id]' with the id number of your site.
-* You may want to tweak the `s-maxage` and `maxage` values. 
+* You may want to tweak the `s-maxage` and `maxage` values.
 
 `s-maxage`     
 The number of seconds that the edge-side cache (Cloudflare) will cache your page. This should be higher than max-age.
@@ -98,7 +125,23 @@ The number of seconds that browsers will cache the page. Note that Cloudflare wi
 
     <IfModule mod_rewrite.c>
      
-    RewriteEngine on    
+    RewriteEngine on   
+
+    #################################################################################
+    # REDIRECT TO CANONICAL DOMAIN - uncomment the relevant rules
+
+    # Redirect to non-www
+    #RewriteCond %{HTTP_HOST} ^www.your-domain.com [NC]
+    #RewriteRule ^(.*)$ https://your-domain.com/$1 [L,R=301]
+
+    # Redirect to www
+    #RewriteCond %{HTTP_HOST} ^your-domain.com [NC]
+    #RewriteRule ^(.*)$ https://www.your-domain.com/$1 [L,R=301]
+
+    # Redirect to https
+    #RewriteCond %{HTTP:CF-Visitor} '"scheme":"http"' 
+    #RewriteRule ^(.*)$ https://your-domain.com/$1 [L,R=301] 
+
 
     #################################################################################
     # START STASH STATIC CACHE
@@ -137,7 +180,6 @@ The number of seconds that browsers will cache the page. Note that Cloudflare wi
         Header set Cache-Control "s-maxage=86400, max-age=1800" ENV=STATIC
     </IfModule>
 
-    # END STASH STATIC CACHE RULES
     #################################################################################
 
     # -------------------------------------------------------------------------------
