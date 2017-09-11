@@ -1,4 +1,4 @@
-##Mustash Cloudflare v1.0.0
+## Mustash Cloudflare v1.0.0
 
 Cloudflare static cache invalidation for Stash/Mustash-powered ExpressionEngine websites.
 
